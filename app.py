@@ -6,7 +6,7 @@ import plotly.express as px # Para la visualización interactiva de gráficos di
 import seaborn as sns # Para la generación de la matriz de calor (Heatmap)
 import matplotlib.pyplot as plt # Soporte estructural para gráficos estáticos de Seaborn
 import statsmodels.api as sm # Para agregar la constante econométrica al set de regresores
-from linearmodels.panel import PanelOLS # Para estimar modelos de panel con doble efecto fijo
+from linearmodels.panel import PanelOLS # Para de panel con doble efecto fijo
 import docx # Para compilar y exportar reportes automatizados en formato Word
 from docx.shared import Inches # Ajuste de márgenes y dimensiones en el reporte exportable
 import io # Para la gestión eficiente de buffers de datos binarios en la memoria virtual
@@ -120,11 +120,12 @@ if uploaded_data is not None:
                 pais_seleccionado = st.selectbox("Seleccione un país:", df_long['País'].unique())
         
         with col_ctrl2:
-            columnas_grafico = [col for col in ['RSF_SCORE', 'CORRUPCION', 'IED_PIB'] if col in df_long.columns]
+            # Añadido CPI_SCORE dentro de las columnas disponibles para el gráfico
+            columnas_grafico = [col for col in ['CPI_SCORE', 'RSF_SCORE', 'CORRUPCION', 'IED_PIB'] if col in df_long.columns]
             variables_seleccionadas = st.multiselect(
                 "Seleccione las variables a graficar:", 
                 options=columnas_grafico, 
-                default=columnas_grafico # Por defecto muestra todas
+                default=columnas_grafico # Por defecto muestra todas las disponibles incluyendo CPI
             )
             
         # --- GENERACIÓN DEL GRÁFICO DE LÍNEAS ---
@@ -146,7 +147,7 @@ if uploaded_data is not None:
                 y=variables_seleccionadas, 
                 title=titulo, 
                 markers=True,
-                color_discrete_sequence=['#1f77b4', '#d62728', '#2ca02c'] # Colores sobrios
+                color_discrete_sequence=['#1f77b4', '#ff7f0e', '#d62728', '#2ca02c'] # 4 Colores sobrios institucionales
             )
             
             # --- DISEÑO ACADÉMICO / PROFESIONAL ---
@@ -328,7 +329,7 @@ if uploaded_data is not None:
         if 'IED_PIB' in df_panel.columns and 'IED_L1' in df_panel.columns:
             vars_mod3 = ['IED_PIB', 'CORRUPCION_L1', 'IED_L1']
             
-            # El dropna() aísla celdas vacías (como el año 2025 o Cuba) sin comprometer el resto del panel.
+            # El dropna() aísla celdas vacías sin comprometer el resto del panel.
             df_m3 = df_panel[vars_mod3].dropna()
             if not df_m3.empty:
                 X3 = sm.add_constant(df_m3[['CORRUPCION_L1', 'IED_L1']])
