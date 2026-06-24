@@ -120,19 +120,17 @@ if uploaded_data is not None:
                 pais_seleccionado = st.selectbox("Seleccione un país:", df_long['País'].unique())
         
         with col_ctrl2:
-            # Añadido CPI_SCORE dentro de las columnas disponibles para el gráfico
             columnas_grafico = [col for col in ['CPI_SCORE', 'RSF_SCORE', 'CORRUPCION', 'IED_PIB'] if col in df_long.columns]
             variables_seleccionadas = st.multiselect(
                 "Seleccione las variables a graficar:", 
                 options=columnas_grafico, 
-                default=columnas_grafico # Por defecto muestra todas las disponibles incluyendo CPI
+                default=columnas_grafico
             )
             
         # --- GENERACIÓN DEL GRÁFICO DE LÍNEAS ---
         if not variables_seleccionadas:
             st.warning("Por favor, seleccione al menos una variable para visualizar.")
         else:
-            # Filtrado de datos según nivel de análisis
             if nivel_analisis == "Promedio Regional":
                 df_grafico = df_long.groupby('Año')[variables_seleccionadas].mean().reset_index()
                 titulo = 'Evolución Promedio en la Región'
@@ -140,58 +138,61 @@ if uploaded_data is not None:
                 df_grafico = df_long[df_long['País'] == pais_seleccionado]
                 titulo = f'Trayectoria Temporal en {pais_seleccionado}'
                 
-            # Creación del gráfico
             fig_line = px.line(
                 df_grafico, 
                 x='Año', 
                 y=variables_seleccionadas, 
                 title=titulo, 
                 markers=True,
-                color_discrete_sequence=['#1f77b4', '#ff7f0e', '#d62728', '#2ca02c'] # 4 Colores sobrios institucionales
+                color_discrete_sequence=['#1f77b4', '#ff7f0e', '#d62728', '#2ca02c'] 
             )
             
-            # --- DISEÑO ACADÉMICO / PROFESIONAL ---
             fig_line.update_layout(
-                template='simple_white',      # Fondo blanco sin cuadrícula pesada
+                template='simple_white',
                 title={'x': 0.5, 'xanchor': 'center', 'font': {'size': 18, 'family': 'Arial', 'color': 'black'}},
                 xaxis_title="Año",
                 yaxis_title="Índice / Porcentaje",
                 legend_title_text="Variables:",
                 font=dict(family="Arial", size=13, color="black"),
-                hovermode="x unified",        # Tooltip consolidado al pasar el ratón
+                hovermode="x unified",
                 margin=dict(l=50, r=30, t=60, b=50),
-                legend=dict(
-                    orientation="h",          # Leyenda horizontal
-                    yanchor="bottom",
-                    y=1.02,
-                    xanchor="right",
-                    x=1
-                )
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
             )
-            
-            # Engrosar líneas y marcadores para asegurar legibilidad en documentos impresos
             fig_line.update_traces(line=dict(width=2.5), marker=dict(size=8))
-            
-            # Mostrar el gráfico en Streamlit
             st.plotly_chart(fig_line, use_container_width=True)
-            
-            # Botón de ayuda para el usuario
-            st.caption("💡 *Tip: Puedes descargar este gráfico con calidad profesional haciendo clic en el icono de la cámara (Download plot as a png) que aparece al pasar el ratón por la esquina superior derecha del gráfico.*")
+            st.caption("💡 *Tip: Puedes descargar este gráfico con calidad profesional haciendo clic en el icono de la cámara (Download plot as a png).*")
 
         st.markdown("---") # Separador visual
 
         st.subheader("2. Diagramas de Dispersión (Scatter Plots) con Línea de Tendencia")
+        
+        # --- APLICADOR DE REZAGO INTERACTIVO ---
+        aplicar_rezago = st.checkbox("🔄 **Aplicador de Rezago (1 Año):** Analizar el impacto de la Corrupción y RSF del año anterior (t-1) sobre las variables actuales (t).", value=True)
+        
+        # Definición de variables dinámicas según si el usuario aplicó el rezago
+        var_rsf = 'RSF_L1' if aplicar_rezago else 'RSF_SCORE'
+        var_corr = 'CORRUPCION_L1' if aplicar_rezago else 'CORRUPCION'
+        sufijo_x = "(t-1)" if aplicar_rezago else "(t)"
+        
         col1, col2, col3 = st.columns(3)
         with col1:
-            fig_scatter1 = px.scatter(df_long, x='RSF_SCORE', y='CORRUPCION', hover_data=['País', 'Año'], trendline='ols', title="RSF vs Corrupción")
+            fig_scatter1 = px.scatter(df_long, x=var_rsf, y='CORRUPCION', hover_data=['País', 'Año'], trendline='ols', 
+                                      title=f"RSF {sufijo_x} vs Corrupción (t)")
+            fig_scatter1.update_layout(template='simple_white', font=dict(family="Arial", color="black"))
             st.plotly_chart(fig_scatter1, use_container_width=True)
+            
         with col2:
             if 'IED_PIB' in df_long.columns:
-                fig_scatter2 = px.scatter(df_long, x='CORRUPCION', y='IED_PIB', hover_data=['País', 'Año'], trendline='ols', title="Corrupción vs IED")
+                fig_scatter2 = px.scatter(df_long, x=var_corr, y='IED_PIB', hover_data=['País', 'Año'], trendline='ols', 
+                                          title=f"Corrupción {sufijo_x} vs IED (t)")
+                fig_scatter2.update_layout(template='simple_white', font=dict(family="Arial", color="black"))
                 st.plotly_chart(fig_scatter2, use_container_width=True)
+                
         with col3:
             if 'IED_PIB' in df_long.columns:
-                fig_scatter3 = px.scatter(df_long, x='RSF_SCORE', y='IED_PIB', hover_data=['País', 'Año'], trendline='ols', title="RSF vs IED")
+                fig_scatter3 = px.scatter(df_long, x=var_rsf, y='IED_PIB', hover_data=['País', 'Año'], trendline='ols', 
+                                          title=f"RSF {sufijo_x} vs IED (t)")
+                fig_scatter3.update_layout(template='simple_white', font=dict(family="Arial", color="black"))
                 st.plotly_chart(fig_scatter3, use_container_width=True)
 
     # =========================================================================
@@ -269,7 +270,7 @@ if uploaded_data is not None:
                                   "una señal creíble de robustez democrática, la libertad de prensa cataliza e impulsa la radicación de flujos de IED de manera autónoma.")
                     else:
                         texto += (f"El coeficiente asociado a **{variable}** es **negativo** ({coef:.4f}) y **estadísticamente significativo** (p={p_value:.3f} < 0.05). "
-                                  "Indica que aumentos en la libertad de prensa preceden contracciones en los flujos de IED, lo que refleja una postura transitoria de cautela por parte "
+                                  "Indica que aumentos en la libertad de prensa preceden contracciones en flujos de IED, lo que refleja una postura transitoria de cautela por parte "
                                   "de las corporaciones globales frente a las turbulencias o debates políticos abiertos que se visibilizan a través de los medios masivos.")
                 else:
                     texto += (f"El coeficiente de **{variable}** ({coef:.4f}) **no es estadísticamente significativo** (p={p_value:.3f} > 0.05). "
