@@ -12,47 +12,53 @@ from docx.shared import Inches # Ajuste de márgenes y dimensiones en el reporte
 import io # Para la gestión eficiente de buffers de datos binarios en la memoria virtual
 
 # -----------------------------------------------------------------------------
-# CONFIGURACIÓN DE LA INTERFAZ DE USUARIO
+# CONFIGURACIÓN DE LA INTERFAZ DE USUARIO Y BARRA LATERAL
 # -----------------------------------------------------------------------------
 st.set_page_config(page_title="Análisis Econométrico de Panel", layout="wide")
 st.title("📊 Análisis Econométrico: Libertad de Prensa, Corrupción e IED")
 st.markdown("""
-Esta aplicación permite transformar una base de datos en formato ancho a largo, 
-explorar descriptivamente las interacciones y estimar modelos dinámicos de panel con controles bidimensionales.
+Esta aplicación permite transformar una base de datos, explorar descriptivamente las interacciones 
+y estimar modelos de panel bidimensionales. Utiliza el menú lateral para ajustar los parámetros globales.
 """)
 
-# -----------------------------------------------------------------------------
-# BARRA LATERAL: CARGA DE ARCHIVOS DE ENTRADA
-# -----------------------------------------------------------------------------
 st.sidebar.header("1. Carga de Archivos")
 uploaded_data = st.sidebar.file_uploader("Sube tu base de datos (Excel o CSV)", type=["xlsx", "csv"])
 uploaded_doc = st.sidebar.file_uploader("Sube el documento Word metodológico (Opcional)", type=["docx"])
 
-# Visualizador del documento metodológico de soporte en la barra lateral
 if uploaded_doc is not None:
     st.sidebar.success("Documento Word cargado correctamente.")
-    with st.expander("📄 Ver Documento Metodológico"):
+    with st.sidebar.expander("📄 Ver Documento Metodológico"):
         doc = docx.Document(uploaded_doc)
         for para in doc.paragraphs:
             st.write(para.text)
+
+st.sidebar.markdown("---")
+st.sidebar.header("2. Configuración Global")
+# TOGGLE MAESTRO: Controla si toda la app usa (t-1) o (t)
+aplicar_rezago_global = st.sidebar.checkbox(
+    "🔄 Aplicar Rezago Temporal (t-1)", 
+    value=True, 
+    help="Si está activo, evalúa cómo el año anterior impacta al actual (Modelos Dinámicos). Si se desactiva, evalúa relaciones en el mismo año (Modelos Contemporáneos Estáticos)."
+)
+
+if aplicar_rezago_global:
+    st.sidebar.info("Modo Dinámico Activado: Las variables explicativas tendrán un rezago de 1 año (t-1).")
+else:
+    st.sidebar.warning("Modo Estático Activado: Todas las relaciones se evalúan en el mismo año (t).")
 
 # -----------------------------------------------------------------------------
 # MOTOR DE PROCESAMIENTO ECONOMÉTRICO
 # -----------------------------------------------------------------------------
 if uploaded_data is not None:
-    # Lectura del archivo de datos tolerante al formato origen
     try:
         if uploaded_data.name.endswith('.csv'):
             df_wide = pd.read_csv(uploaded_data)
         else:
             df_wide = pd.read_excel(uploaded_data)
-        st.success("Base de datos cargada exitosamente.")
     except Exception as e:
         st.error(f"Error crítico al leer el archivo de entrada: {e}")
         st.stop()
 
-    st.header("2. Transformación Estructural de Datos")
-    
     # Definición de una lista explícita de stubnames para máxima robustez
     stubnames_lista = ['CPI_SCORE', 'CPI_RANK', 'CPI_RANKING', 'CORRUPCION', 'RSF_SCORE', 'RSF_RANK', 'RSF_RANKING', 'IED_PIB']
     
@@ -60,10 +66,10 @@ if uploaded_data is not None:
     df_long = pd.wide_to_long(
         df_wide, 
         stubnames=stubnames_lista,
-        i='País',                 # Unidad de corte transversal (Individuo)
-        j='Año',                  # Unidad temporal (Tiempo)
-        sep='_',                  # Carácter delimitador antes del año numérico
-        suffix=r'\d+'             # Expresión regular que captura el sufijo entero del año
+        i='País',
+        j='Año',
+        sep='_',
+        suffix=r'\d+'
     ).reset_index()               
 
     # Ordenamiento jerárquico indispensable para el correcto cálculo de rezagos temporales
@@ -72,18 +78,18 @@ if uploaded_data is not None:
     # -------------------------------------------------------------------------
     # GENERACIÓN DE VARIABLES REZAGADAS (LAGGED VARIABLES)
     # -------------------------------------------------------------------------
-    # Se agrupa estrictamente por país para que los límites nacionales impidan contaminación de datos
     df_long['RSF_L1'] = df_long.groupby('País')['RSF_SCORE'].shift(1)
     df_long['CORRUPCION_L1'] = df_long.groupby('País')['CORRUPCION'].shift(1)
     
-    # Verificación defensiva y cálculo del rezago de la Inversión Extranjera Directa
     if 'IED_PIB' in df_long.columns:
         df_long['IED_L1'] = df_long.groupby('País')['IED_PIB'].shift(1)
     else:
         df_long['IED_L1'] = np.nan
 
-    st.write("Vista previa de los datos transformados en Formato Largo (Panel Long Format):")
-    st.dataframe(df_long.head(10))
+    # Asignación dinámica de variables explicativas basadas en el Toggle Maestro
+    var_rsf_explicativa = 'RSF_L1' if aplicar_rezago_global else 'RSF_SCORE'
+    var_corr_explicativa = 'CORRUPCION_L1' if aplicar_rezago_global else 'CORRUPCION'
+    sufijo_tiempo = "(t-1)" if aplicar_rezago_global else "(t)"
 
     # Despliegue modular a través de pestañas funcionales
     tab1, tab2, tab3, tab4 = st.tabs(["Estadísticas Descriptivas", "Gráficos Interactivos", "Modelos Econométricos", "Exportar Resultados"])
@@ -106,14 +112,12 @@ if uploaded_data is not None:
         st.pyplot(fig_corr)
 
     # =========================================================================
-    # PESTAÑA 2: GRÁFICOS INTERACTIVOS Y DE DISPERSIÓN (DISEÑO ACADÉMICO)
+    # PESTAÑA 2: GRÁFICOS INTERACTIVOS Y DE DISPERSIÓN
     # =========================================================================
     with tab2:
         st.subheader("1. Evolución Temporal de Indicadores (Personalizable)")
         
-        # --- SECCIÓN DE CONTROLES INTERACTIVOS ---
         col_ctrl1, col_ctrl2 = st.columns(2)
-        
         with col_ctrl1:
             nivel_analisis = st.radio("Seleccione el nivel de análisis:", ["Promedio Regional", "País Específico"])
             if nivel_analisis == "País Específico":
@@ -127,7 +131,6 @@ if uploaded_data is not None:
                 default=columnas_grafico
             )
             
-        # --- GENERACIÓN DEL GRÁFICO DE LÍNEAS ---
         if not variables_seleccionadas:
             st.warning("Por favor, seleccione al menos una variable para visualizar.")
         else:
@@ -139,236 +142,157 @@ if uploaded_data is not None:
                 titulo = f'Trayectoria Temporal en {pais_seleccionado}'
                 
             fig_line = px.line(
-                df_grafico, 
-                x='Año', 
-                y=variables_seleccionadas, 
-                title=titulo, 
-                markers=True,
+                df_grafico, x='Año', y=variables_seleccionadas, title=titulo, markers=True,
                 color_discrete_sequence=['#1f77b4', '#ff7f0e', '#d62728', '#2ca02c'] 
             )
             
             fig_line.update_layout(
                 template='simple_white',
                 title={'x': 0.5, 'xanchor': 'center', 'font': {'size': 18, 'family': 'Arial', 'color': 'black'}},
-                xaxis_title="Año",
-                yaxis_title="Índice / Porcentaje",
-                legend_title_text="Variables:",
-                font=dict(family="Arial", size=13, color="black"),
-                hovermode="x unified",
-                margin=dict(l=50, r=30, t=60, b=50),
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                xaxis_title="Año", yaxis_title="Índice / Porcentaje", legend_title_text="Variables:",
+                font=dict(family="Arial", size=13, color="black"), hovermode="x unified",
+                margin=dict(l=50, r=30, t=60, b=50), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
             )
             fig_line.update_traces(line=dict(width=2.5), marker=dict(size=8))
             st.plotly_chart(fig_line, use_container_width=True)
-            st.caption("💡 *Tip: Puedes descargar este gráfico con calidad profesional haciendo clic en el icono de la cámara (Download plot as a png).*")
 
-        st.markdown("---") # Separador visual
-
-        st.subheader("2. Diagramas de Dispersión (Scatter Plots) con Línea de Tendencia")
-        
-        # --- APLICADOR DE REZAGO INTERACTIVO ---
-        aplicar_rezago = st.checkbox("🔄 **Aplicador de Rezago (1 Año):** Analizar el impacto de la Corrupción y RSF del año anterior (t-1) sobre las variables actuales (t).", value=True)
-        
-        # Definición de variables dinámicas según si el usuario aplicó el rezago
-        var_rsf = 'RSF_L1' if aplicar_rezago else 'RSF_SCORE'
-        var_corr = 'CORRUPCION_L1' if aplicar_rezago else 'CORRUPCION'
-        sufijo_x = "(t-1)" if aplicar_rezago else "(t)"
+        st.markdown("---")
+        st.subheader(f"2. Diagramas de Dispersión (Dependen del Toggle Maestro: {sufijo_tiempo})")
         
         col1, col2, col3 = st.columns(3)
         with col1:
-            fig_scatter1 = px.scatter(df_long, x=var_rsf, y='CORRUPCION', hover_data=['País', 'Año'], trendline='ols', 
-                                      title=f"RSF {sufijo_x} vs Corrupción (t)")
+            fig_scatter1 = px.scatter(df_long, x=var_rsf_explicativa, y='CORRUPCION', hover_data=['País', 'Año'], trendline='ols', 
+                                      title=f"RSF {sufijo_tiempo} vs Corrupción (t)")
             fig_scatter1.update_layout(template='simple_white', font=dict(family="Arial", color="black"))
             st.plotly_chart(fig_scatter1, use_container_width=True)
             
         with col2:
             if 'IED_PIB' in df_long.columns:
-                fig_scatter2 = px.scatter(df_long, x=var_corr, y='IED_PIB', hover_data=['País', 'Año'], trendline='ols', 
-                                          title=f"Corrupción {sufijo_x} vs IED (t)")
+                fig_scatter2 = px.scatter(df_long, x=var_corr_explicativa, y='IED_PIB', hover_data=['País', 'Año'], trendline='ols', 
+                                          title=f"Corrupción {sufijo_tiempo} vs IED (t)")
                 fig_scatter2.update_layout(template='simple_white', font=dict(family="Arial", color="black"))
                 st.plotly_chart(fig_scatter2, use_container_width=True)
                 
         with col3:
             if 'IED_PIB' in df_long.columns:
-                fig_scatter3 = px.scatter(df_long, x=var_rsf, y='IED_PIB', hover_data=['País', 'Año'], trendline='ols', 
-                                          title=f"RSF {sufijo_x} vs IED (t)")
+                fig_scatter3 = px.scatter(df_long, x=var_rsf_explicativa, y='IED_PIB', hover_data=['País', 'Año'], trendline='ols', 
+                                          title=f"RSF {sufijo_tiempo} vs IED (t)")
                 fig_scatter3.update_layout(template='simple_white', font=dict(family="Arial", color="black"))
                 st.plotly_chart(fig_scatter3, use_container_width=True)
 
     # =========================================================================
-    # PESTAÑA 3: ESTIMACIÓN DE MODELOS DINÁMICOS DE PANEL
+    # PESTAÑA 3: ESTIMACIÓN DE MODELOS (ESTÁTICOS O DINÁMICOS SEGÚN TOGGLE)
     # =========================================================================
     with tab3:
-        st.subheader("Estimación de Modelos de PanelOLS (Efectos Fijos de País y de Tiempo)")
-        
-        # Seteamos el MultiIndex (Índice de Grupo, Índice de Tiempo) requerido por linearmodels
+        if aplicar_rezago_global:
+            st.subheader("Estimación de Modelos de Panel DINÁMICOS (Efectos Fijos Bidimensionales con Lags)")
+        else:
+            st.subheader("Estimación de Modelos de Panel ESTÁTICOS CONTEMPORÁNEOS (Efectos Fijos Bidimensionales)")
+            
         df_panel = df_long.set_index(['País', 'Año'])
 
-        # Función enriquecida de interpretación automática orientada a la sustancia jurídico-económica
-        def interpretar_resultado_sustantivo(modelo_num, variable, coef, p_value):
+        def interpretar_resultado_sustantivo(modelo_num, variable, coef, p_value, usar_rezago):
             significativo = p_value < 0.05
+            
+            # Variables textuales dinámicas según si hay rezago o no
+            t_anterior = "en el período anterior predice un incremento posterior" if usar_rezago else "se asocia simultáneamente con un incremento"
+            t_previa = "previa" if usar_rezago else "contemporánea"
+            t_subsecuente = "subsecuente" if usar_rezago else "inmediato"
+            t_preceden = "preceden contracciones" if usar_rezago else "están correlacionados con contracciones"
+            t_ahuyenta = "previa actúa como un 'impuesto directo implícito' que ahuyenta" if usar_rezago else "actúa como un 'impuesto directo implícito' que frena inmediatamente"
             
             texto = f"**Interpretación Institucional Automatizada ({variable}):**\n\n"
             if modelo_num == 1:
                 if significativo:
                     if coef < 0:
                         texto += (f"El coeficiente asociado a **{variable}** es **negativo** ({coef:.4f}) y **estadísticamente significativo** (p={p_value:.3f} < 0.05). "
-                                  "Este hallazgo respalda empíricamente la hipótesis central de la investigación: un deterioro o disminución en las garantías a la libertad de prensa "
-                                  "en el período anterior predice un incremento posterior en los niveles de corrupción sistémica. "
-                                  "Desde una perspectiva jurídico-institucional, esto demuestra que restringir el ejercicio periodístico debilita los canales de fiscalización social, "
-                                  "disminuye la probabilidad de detección pública y reduce sustancialmente los costos políticos y legales de las conductas corruptas.")
+                                  f"Este hallazgo indica que un deterioro en las garantías a la libertad de prensa {t_anterior} en los niveles de corrupción sistémica. "
+                                  "Desde una perspectiva jurídico-institucional, esto demuestra que restringir el ejercicio periodístico debilita los canales de fiscalización social.")
                     else:
                         texto += (f"El coeficiente asociado a **{variable}** es **positivo** ({coef:.4f}) y **estadísticamente significativo** (p={p_value:.3f} < 0.05). "
-                                  "Este resultado indica que incrementos en los índices de libertad de prensa se asocian temporalmente con un aumento en las métricas de corrupción. "
-                                  "En la literatura especializada, esto se asocia al 'efecto destape': un entorno con mayor libertad informativa provee las condiciones para "
-                                  "que los medios investiguen y expongan escándalos gubernamentales que antes permanecían ocultos bajo esquemas opacos, elevando temporalmente el registro de corrupción.")
+                                  "Este resultado indica que incrementos en los índices de libertad de prensa se asocian con un aumento en las métricas de corrupción. "
+                                  "En la literatura, esto se asocia al 'efecto destape': un entorno de libertad provee condiciones para exponer escándalos previamente ocultos.")
                 else:
-                    texto += (f"El coeficiente de **{variable}** ({coef:.4f}) **no es estadísticamente significativo** (p={p_value:.3f} > 0.05). "
-                              "Bajo la exigente especificación de efectos fijos bidimensionales, no se observa que las variaciones previas de la libertad de prensa "
-                              "anticipen variaciones sistemáticas y lineales en los niveles de corrupción agregada para esta muestra de países.")
+                    texto += f"El coeficiente de **{variable}** ({coef:.4f}) **no es estadísticamente significativo** (p={p_value:.3f} > 0.05). No se observa una relación sistemática bajo esta especificación."
                     
             elif modelo_num == 2:
                 if significativo:
                     if coef < 0:
-                        texto += (f"El coeficiente asociado a **{variable}** es **negativo** ({coef:.4f}) y **estadísticamente significativo** (p={p_value:.3f} < 0.05). "
-                                  "Aporta fuerte evidencia sobre un ciclo destructivo de retroalimentación institucional: una mayor prevalencia de corrupción previa "
-                                  "predice un menoscabo subsecuente sobre los puntajes de libertad de prensa (menor RSF_SCORE). Esto sugiere que las redes de corrupción institucionalizadas "
-                                  "utilizan activamente el poder del Estado u otros mecanismos de presión para censurar, capturar o asfixiar financieramente a los medios digitales e impresos, "
-                                  "buscando neutralizar las amenazas informativas a su impunidad.")
+                        texto += (f"El coeficiente es **negativo** ({coef:.4f}) y **estadísticamente significativo** (p={p_value:.3f} < 0.05). "
+                                  f"Evidencia un ciclo destructivo: una mayor prevalencia de corrupción {t_previa} genera un menoscabo {t_subsecuente} sobre la libertad de prensa. "
+                                  "Sugiere que redes institucionalizadas utilizan el poder del Estado para asfixiar a los medios y proteger su impunidad.")
                     else:
-                        texto += (f"El coeficiente asociado a **{variable}** es **positivo** ({coef:.4f}) y **estadísticamente significativo** (p={p_value:.3f} < 0.05). "
-                                  "Indica que mayores niveles de corrupción se asocian temporalmente con ganancias posteriores en libertad de prensa, sugiriendo dinámicas "
-                                  "de resistencia civil donde la crisis institucional incentiva el surgimiento de periodismo independiente de investigación.")
+                        texto += (f"El coeficiente es **positivo** ({coef:.4f}) y **estadísticamente significativo** (p={p_value:.3f} < 0.05). "
+                                  "Mayores niveles de corrupción se asocian con ganancias en libertad de prensa, sugiriendo dinámicas de resistencia civil.")
                 else:
-                    texto += (f"El coeficiente de **{variable}** ({coef:.4f}) **no es estadísticamente significativo** (p={p_value:.3f} > 0.05). "
-                              "Controlando estrictamente por diferencias estructurales internas y shocks macro-regionales comunes, la corrupción previa no ejerce un "
-                              "efecto predictivo robusto sobre los niveles agregados de libertad de prensa.")
+                    texto += f"El coeficiente de **{variable}** ({coef:.4f}) **no es estadísticamente significativo** (p={p_value:.3f} > 0.05)."
 
             elif modelo_num == 3:
                 if significativo:
                     if coef < 0:
-                        texto += (f"El coeficiente asociado a **{variable}** es **negativo** ({coef:.4f}) y **estadísticamente significativo** (p={p_value:.3f} < 0.05). "
-                                  "Este hallazgo valida la tesis económica del riesgo soberano: la corrupción previa actúa como un 'impuesto directo implícito' que ahuyenta los capitales. "
-                                  "Al deteriorar la seguridad jurídica y distorsionar los contratos de mercado, un incremento de la opacidad institucional deprime de forma directa "
-                                  "la atracción de Inversión Extranjera Directa (IED) en los periodos subsecuentes.")
+                        texto += (f"El coeficiente es **negativo** ({coef:.4f}) y **estadísticamente significativo** (p={p_value:.3f} < 0.05). "
+                                  f"Valida la tesis del riesgo soberano: la corrupción {t_ahuyenta} los capitales al deteriorar la seguridad jurídica de los contratos de mercado.")
                     else:
-                        texto += (f"El coeficiente asociado a **{variable}** es **positivo** ({coef:.4f}) y **estadísticamente significativo** (p={p_value:.3f} < 0.05). "
-                                  "Este resultado se alinea teóricamente con la hipótesis de 'engrasar las ruedas' (*greasing the wheels*), la cual plantea que, "
-                                  "en entornos con burocracias estatales extremadamente ineficientes, ciertos flujos internacionales de capital de corto plazo utilizan canales "
-                                  "irregulares para agilizar transacciones operativas, comprometiendo la sostenibilidad de largo plazo.")
+                        texto += (f"El coeficiente es **positivo** ({coef:.4f}) y **estadísticamente significativo** (p={p_value:.3f} < 0.05). "
+                                  "Se alinea con la hipótesis de 'engrasar las ruedas', donde el capital utiliza canales irregulares para agilizar burocracias ineficientes.")
                 else:
-                    texto += (f"El coeficiente de **{variable}** ({coef:.4f}) **no es estadísticamente significativo** (p={p_value:.3f} > 0.05). "
-                              "Controlando por factores temporales globales (como oscilaciones en tasas de interés internacionales o crisis sanitarias), la corrupción interna rezagada "
-                              "no exhibe un impacto sistemático lineal sobre las fluctuaciones de la inversión extranjera.")
+                    texto += f"El coeficiente de **{variable}** ({coef:.4f}) **no es estadísticamente significativo** (p={p_value:.3f} > 0.05). La opacidad institucional no exhibe un impacto lineal directo sobre la IED."
 
             elif modelo_num == 4:
                 if significativo:
                     if coef > 0:
-                        texto += (f"El coeficiente asociado a **{variable}** es **positivo** ({coef:.4f}) y **estadísticamente significativo** (p={p_value:.3f} < 0.05). "
-                                  "Este hallazgo es de alto valor estratégico para la política pública: un entorno transparente y seguro para el ejercicio de la prensa "
-                                  "genera externalidades económicas directas y positivas. Al mitigar sistemáticamente las asimetrías de información en los mercados y servir como "
-                                  "una señal creíble de robustez democrática, la libertad de prensa cataliza e impulsa la radicación de flujos de IED de manera autónoma.")
+                        texto += (f"El coeficiente es **positivo** ({coef:.4f}) y **estadísticamente significativo** (p={p_value:.3f} < 0.05). "
+                                  "Un entorno transparente y seguro para la prensa genera externalidades económicas positivas. Al mitigar asimetrías de información, cataliza la IED.")
                     else:
-                        texto += (f"El coeficiente asociado a **{variable}** es **negativo** ({coef:.4f}) y **estadísticamente significativo** (p={p_value:.3f} < 0.05). "
-                                  "Indica que aumentos en la libertad de prensa preceden contracciones en flujos de IED, lo que refleja una postura transitoria de cautela por parte "
-                                  "de las corporaciones globales frente a las turbulencias o debates políticos abiertos que se visibilizan a través de los medios masivos.")
+                        texto += (f"El coeficiente es **negativo** ({coef:.4f}) y **estadísticamente significativo** (p={p_value:.3f} < 0.05). "
+                                  f"Aumentos en la libertad de prensa {t_preceden} en flujos de IED, reflejando una postura transitoria de cautela corporativa frente a turbulencias políticas visibles.")
                 else:
-                    texto += (f"El coeficiente de **{variable}** ({coef:.4f}) **no es estadísticamente significativo** (p={p_value:.3f} > 0.05). "
-                              "El modelo bidimensional no halla un impacto directo de la libertad de prensa previa sobre la IED, lo cual sugiere que los efectos económicos de los "
-                              "flujos de información operan de forma indirecta, estando potencialmente mediados por el control institucional de la corrupción.")
+                    texto += f"El coeficiente de **{variable}** ({coef:.4f}) **no es estadísticamente significativo** (p={p_value:.3f} > 0.05)."
             return texto
 
-        # Diccionarios de almacenamiento para la correcta compilación de reportes
-        resultados_exportacion = {}
-        interpretaciones_exportacion = {}
+        resultados_exportacion, interpretaciones_exportacion = {}, {}
 
         # ---------------------------------------------------------------------
-        # MODELO 1: Impacto de la Libertad de Prensa sobre la Corrupción
+        # ESTRUCTURACIÓN DE MODELOS (DEPENDIENDO DEL TOGGLE GLOBAL)
+        # Si hay rezago, incluimos los rezagos autorregresivos, si no, solo contemporaneous.
         # ---------------------------------------------------------------------
-        st.markdown("### Modelo 1: Efecto de Libertad de Prensa sobre Corrupción")
-        vars_mod1 = ['CORRUPCION', 'RSF_L1', 'CORRUPCION_L1']
-        df_m1 = df_panel[vars_mod1].dropna()
-        if not df_m1.empty:
-            X1 = sm.add_constant(df_m1[['RSF_L1', 'CORRUPCION_L1']])
-            Y1 = df_m1['CORRUPCION']
+        def correr_modelo(num_mod, titulo, var_dep, vars_indep, var_foco):
+            st.markdown(f"### {titulo}")
+            variables_necesarias = [var_dep] + vars_indep
+            df_m = df_panel[variables_necesarias].dropna()
             
-            # Estimación con efectos fijos individuales y temporales (entity_effects y time_effects)
-            mod1 = PanelOLS(Y1, X1, entity_effects=True, time_effects=True)
-            res1 = mod1.fit(cov_type='robust')
-            st.text(res1.summary)
-            
-            interp1 = interpretar_resultado_sustantivo(1, "RSF_L1", res1.params['RSF_L1'], res1.pvalues['RSF_L1'])
-            st.info("💡 **Interpretación Sustantiva:**\n\n" + interp1)
-            resultados_exportacion['Modelo 1'] = res1.summary.as_text()
-            interpretaciones_exportacion['Modelo 1'] = interp1
-        else:
-            st.warning("No hay suficientes datos válidos para estimar el Modelo 1.")
-
-        # ---------------------------------------------------------------------
-        # MODELO 2: Retroalimentación (Corrupción sobre Libertad de Prensa)
-        # ---------------------------------------------------------------------
-        st.markdown("### Modelo 2: Retroalimentación (Corrupción sobre Libertad de Prensa)")
-        vars_mod2 = ['RSF_SCORE', 'CORRUPCION_L1', 'RSF_L1']
-        df_m2 = df_panel[vars_mod2].dropna()
-        if not df_m2.empty:
-            X2 = sm.add_constant(df_m2[['CORRUPCION_L1', 'RSF_L1']])
-            Y2 = df_m2['RSF_SCORE']
-            
-            mod2 = PanelOLS(Y2, X2, entity_effects=True, time_effects=True)
-            res2 = mod2.fit(cov_type='robust')
-            st.text(res2.summary)
-            
-            interp2 = interpretar_resultado_sustantivo(2, "CORRUPCION_L1", res2.params['CORRUPCION_L1'], res2.pvalues['CORRUPCION_L1'])
-            st.info("💡 **Interpretación Sustantiva:**\n\n" + interp2)
-            resultados_exportacion['Modelo 2'] = res2.summary.as_text()
-            interpretaciones_exportacion['Modelo 2'] = interp2
-
-        # ---------------------------------------------------------------------
-        # MODELO 3: Efecto de la Corrupción sobre la Inversión Extranjera Directa
-        # ---------------------------------------------------------------------
-        st.markdown("### Modelo 3: Efecto de Corrupción sobre IED")
-        if 'IED_PIB' in df_panel.columns and 'IED_L1' in df_panel.columns:
-            vars_mod3 = ['IED_PIB', 'CORRUPCION_L1', 'IED_L1']
-            
-            # El dropna() aísla celdas vacías sin comprometer el resto del panel.
-            df_m3 = df_panel[vars_mod3].dropna()
-            if not df_m3.empty:
-                X3 = sm.add_constant(df_m3[['CORRUPCION_L1', 'IED_L1']])
-                Y3 = df_m3['IED_PIB']
+            if not df_m.empty:
+                X = sm.add_constant(df_m[vars_indep])
+                Y = df_m[var_dep]
+                mod = PanelOLS(Y, X, entity_effects=True, time_effects=True)
+                res = mod.fit(cov_type='robust')
+                st.text(res.summary)
                 
-                mod3 = PanelOLS(Y3, X3, entity_effects=True, time_effects=True)
-                res3 = mod3.fit(cov_type='robust')
-                st.text(res3.summary)
+                interp = interpretar_resultado_sustantivo(num_mod, var_foco, res.params[var_foco], res.pvalues[var_foco], aplicar_rezago_global)
+                st.info("💡 **Interpretación Sustantiva:**\n\n" + interp)
                 
-                interp3 = interpretar_resultado_sustantivo(3, "CORRUPCION_L1", res3.params['CORRUPCION_L1'], res3.pvalues['CORRUPCION_L1'])
-                st.info("💡 **Interpretación Sustantiva:**\n\n" + interp3)
-                resultados_exportacion['Modelo 3'] = res3.summary.as_text()
-                interpretaciones_exportacion['Modelo 3'] = interp3
+                resultados_exportacion[titulo] = res.summary.as_text()
+                interpretaciones_exportacion[titulo] = interp
             else:
-                st.warning("No hay suficientes observaciones de IED completas para procesar el Modelo 3.")
+                st.warning(f"No hay suficientes datos válidos para estimar el Modelo {num_mod}.")
 
-        # ---------------------------------------------------------------------
-        # MODELO 4: Efecto Directo de la Libertad de Prensa sobre la IED
-        # ---------------------------------------------------------------------
-        st.markdown("### Modelo 4: Efecto de Libertad de Prensa sobre IED")
-        if 'IED_PIB' in df_panel.columns and 'IED_L1' in df_panel.columns:
-            vars_mod4 = ['IED_PIB', 'RSF_L1', 'IED_L1']
-            
-            df_m4 = df_panel[vars_mod4].dropna()
-            if not df_m4.empty:
-                X4 = sm.add_constant(df_m4[['RSF_L1', 'IED_L1']])
-                Y4 = df_m4['IED_PIB']
-                
-                mod4 = PanelOLS(Y4, X4, entity_effects=True, time_effects=True)
-                res4 = mod4.fit(cov_type='robust')
-                st.text(res4.summary)
-                
-                interp4 = interpretar_resultado_sustantivo(4, "RSF_L1", res4.params['RSF_L1'], res4.pvalues['RSF_L1'])
-                st.info("💡 **Interpretación Sustantiva:**\n\n" + interp4)
-                resultados_exportacion['Modelo 4'] = res4.summary.as_text()
-                interpretaciones_exportacion['Modelo 4'] = interp4
-            else:
-                st.warning("No existen suficientes registros de IED válidos para el Modelo 4.")
+        # MODELO 1
+        vars_indep_m1 = ['RSF_L1', 'CORRUPCION_L1'] if aplicar_rezago_global else ['RSF_SCORE']
+        correr_modelo(1, "Modelo 1: Efecto de Libertad de Prensa sobre Corrupción", 'CORRUPCION', vars_indep_m1, var_rsf_explicativa)
+
+        # MODELO 2
+        vars_indep_m2 = ['CORRUPCION_L1', 'RSF_L1'] if aplicar_rezago_global else ['CORRUPCION']
+        correr_modelo(2, "Modelo 2: Efecto de Corrupción sobre Libertad de Prensa", 'RSF_SCORE', vars_indep_m2, var_corr_explicativa)
+
+        # MODELO 3
+        if 'IED_PIB' in df_panel.columns:
+            vars_indep_m3 = ['CORRUPCION_L1', 'IED_L1'] if aplicar_rezago_global else ['CORRUPCION']
+            correr_modelo(3, "Modelo 3: Efecto de Corrupción sobre IED", 'IED_PIB', vars_indep_m3, var_corr_explicativa)
+
+        # MODELO 4
+        if 'IED_PIB' in df_panel.columns:
+            vars_indep_m4 = ['RSF_L1', 'IED_L1'] if aplicar_rezago_global else ['RSF_SCORE']
+            correr_modelo(4, "Modelo 4: Efecto de Libertad de Prensa sobre IED", 'IED_PIB', vars_indep_m4, var_rsf_explicativa)
 
     # =========================================================================
     # PESTAÑA 4: COMPILACIÓN Y EXPORTACIÓN DE REPORTES INSTITUCIONALES
@@ -376,7 +300,6 @@ if uploaded_data is not None:
     with tab4:
         st.subheader("Módulo de Descargas e Informes Académicos")
         
-        # Canal de descarga para el dataframe estructurado en formato largo
         output_excel = io.BytesIO()
         df_long.to_excel(output_excel, index=False, engine='openpyxl')
         st.download_button(
@@ -386,24 +309,22 @@ if uploaded_data is not None:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
         
-        # Compilación del reporte ejecutivo dinámico en Word
         def generar_word_reporte():
             doc = docx.Document()
             doc.add_heading('Informe de Investigación: Libertad de Prensa, Calidad Institucional y Desempeño Económico', 0)
             
+            tipo_mod = "Dinámicos con Rezagos (t-1)" if aplicar_rezago_global else "Estáticos Contemporáneos (t)"
+            doc.add_paragraph(f"Nota Metodológica: Para la estructuración de este reporte se utilizó el modelo de {tipo_mod}.")
+            
             doc.add_heading('1. Análisis Descriptivo Agregado del Panel', level=1)
-            doc.add_paragraph("A continuación se presentan las métricas de tendencia central y dispersión calculadas de forma global para la muestra:")
             doc.add_paragraph(desc_stats.to_string())
             
-            doc.add_heading('2. Estimaciones con Modelos de Panel Dinámico (Doble Efecto Fijo)', level=1)
-            doc.add_paragraph("Los coeficientes se computaron controlando simultáneamente por efectos fijos individuales (país) y choques temporales comunes (año), aplicando matrices de covarianza robustas:")
+            doc.add_heading('2. Estimaciones con Modelos de Panel', level=1)
             
             for nombre_modelo, resumen_texto in resultados_exportacion.items():
                 doc.add_heading(nombre_modelo, level=2)
-                doc.add_paragraph("**Métricas Estadísticas del Modelo:**")
                 doc.add_paragraph(resumen_texto)
                 if nombre_modelo in interpretaciones_exportacion:
-                    doc.add_paragraph("**Evaluación de la Lógica Sustantiva e Impacto Institucional:**")
                     doc.add_paragraph(interpretaciones_exportacion[nombre_modelo])
             
             word_io = io.BytesIO()
@@ -412,7 +333,7 @@ if uploaded_data is not None:
             
         word_data = generar_word_reporte()
         st.download_button(
-            label="📄 Descargar Informe Completo e Interpretación Sustantiva (Word)",
+            label="📄 Descargar Informe Completo (Word)",
             data=word_data,
             file_name="Reporte_Final_Econometrico.docx",
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
