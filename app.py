@@ -17,8 +17,8 @@ import io # Para la gestión eficiente de buffers de datos binarios en la memori
 st.set_page_config(page_title="Análisis Econométrico de Panel", layout="wide")
 st.title("📊 Análisis Econométrico: Libertad de Prensa, Corrupción e IED")
 st.markdown("""
-Esta aplicación permite transformar una base de datos, explorar descriptivamente las interacciones 
-y estimar modelos de panel bidimensionales. Utiliza el menú lateral para ajustar los parámetros globales.
+Esta aplicación permite transformar una base de datos, explorar descriptivamente las interacciones, 
+identificar casos atípicos y estimar modelos de panel bidimensionales. Utiliza el menú lateral para ajustar los parámetros globales.
 """)
 
 st.sidebar.header("1. Carga de Archivos")
@@ -34,7 +34,7 @@ if uploaded_doc is not None:
 
 st.sidebar.markdown("---")
 st.sidebar.header("2. Configuración Global")
-# TOGGLE MAESTRO: Controla si toda la app usa (t-1) o (t)
+# TOGGLE MAESTRO: Controla si toda la app usa (t-1) o (t) para dispersión y modelos
 aplicar_rezago_global = st.sidebar.checkbox(
     "🔄 Aplicar Rezago Temporal (t-1)", 
     value=True, 
@@ -112,7 +112,7 @@ if uploaded_data is not None:
         st.pyplot(fig_corr)
 
     # =========================================================================
-    # PESTAÑA 2: GRÁFICOS INTERACTIVOS Y DE DISPERSIÓN
+    # PESTAÑA 2: GRÁFICOS INTERACTIVOS, CASOS ATÍPICOS Y DISPERSIÓN
     # =========================================================================
     with tab2:
         st.subheader("1. Evolución Temporal de Indicadores (Personalizable)")
@@ -157,7 +157,58 @@ if uploaded_data is not None:
             st.plotly_chart(fig_line, use_container_width=True)
 
         st.markdown("---")
-        st.subheader(f"2. Diagramas de Dispersión (Dependen del Toggle Maestro: {sufijo_tiempo})")
+        
+        # --- NUEVO MÓDULO: CASOS ATÍPICOS Y VARIACIONES ---
+        st.subheader("2. Casos Atípicos y Análisis de Variación (Ganadores y Perdedores)")
+        st.write("Visualiza rápidamente qué países registraron los cambios más extremos (positivos o negativos) comparando su primer año de registro con su último año.")
+        
+        var_atipica = st.selectbox("Seleccione la variable para analizar casos atípicos:", columnas_grafico)
+        
+        # Cálculo de las variaciones extremas
+        df_agrupado = df_long.dropna(subset=[var_atipica]).sort_values(by=['País', 'Año'])
+        primeros_registros = df_agrupado.groupby('País').first().reset_index()
+        ultimos_registros = df_agrupado.groupby('País').last().reset_index()
+        
+        df_variaciones = pd.DataFrame({
+            'País': primeros_registros['País'],
+            'Año Inicial': primeros_registros['Año'],
+            'Valor Inicial': primeros_registros[var_atipica],
+            'Año Final': ultimos_registros['Año'],
+            'Valor Final': ultimos_registros[var_atipica],
+            'Variación Neta': ultimos_registros[var_atipica] - primeros_registros[var_atipica]
+        }).sort_values(by='Variación Neta', ascending=False)
+        
+        # Gráfico de barras divergente
+        fig_var = px.bar(
+            df_variaciones, 
+            x='País', 
+            y='Variación Neta', 
+            title=f"Variación Total de {var_atipica} en el Período Estudiado",
+            color='Variación Neta',
+            color_continuous_scale=px.colors.diverging.RdYlGn, # Escala de Rojo (Negativo) a Verde (Positivo)
+            text_auto='.2f'
+        )
+        fig_var.update_layout(
+            template='simple_white', 
+            font=dict(family="Arial", color="black"),
+            xaxis_title="", 
+            yaxis_title="Cambio Neto (Puntos/Porcentaje)",
+            coloraxis_showscale=False # Ocultar la barra de color lateral para un look más académico
+        )
+        st.plotly_chart(fig_var, use_container_width=True)
+        
+        # Tablas de resumen para los Top Extremos
+        col_ganadores, col_perdedores = st.columns(2)
+        with col_ganadores:
+            st.success(f"🏆 Top 3: Mayores Incrementos en {var_atipica}")
+            # Formateo limpio para mostrar en pantalla
+            st.dataframe(df_variaciones.head(3)[['País', 'Valor Inicial', 'Valor Final', 'Variación Neta']].style.format({"Valor Inicial": "{:.2f}", "Valor Final": "{:.2f}", "Variación Neta": "{:+.2f}"}))
+        with col_perdedores:
+            st.error(f"🚨 Top 3: Caídas Más Extremas en {var_atipica}")
+            st.dataframe(df_variaciones.tail(3)[['País', 'Valor Inicial', 'Valor Final', 'Variación Neta']].style.format({"Valor Inicial": "{:.2f}", "Valor Final": "{:.2f}", "Variación Neta": "{:+.2f}"}))
+
+        st.markdown("---")
+        st.subheader(f"3. Diagramas de Dispersión (Dependen del Toggle Maestro: {sufijo_tiempo})")
         
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -194,7 +245,6 @@ if uploaded_data is not None:
         def interpretar_resultado_sustantivo(modelo_num, variable, coef, p_value, usar_rezago):
             significativo = p_value < 0.05
             
-            # Variables textuales dinámicas según si hay rezago o no
             t_anterior = "en el período anterior predice un incremento posterior" if usar_rezago else "se asocia simultáneamente con un incremento"
             t_previa = "previa" if usar_rezago else "contemporánea"
             t_subsecuente = "subsecuente" if usar_rezago else "inmediato"
@@ -253,8 +303,7 @@ if uploaded_data is not None:
         resultados_exportacion, interpretaciones_exportacion = {}, {}
 
         # ---------------------------------------------------------------------
-        # ESTRUCTURACIÓN DE MODELOS (DEPENDIENDO DEL TOGGLE GLOBAL)
-        # Si hay rezago, incluimos los rezagos autorregresivos, si no, solo contemporaneous.
+        # ESTRUCTURACIÓN DE MODELOS
         # ---------------------------------------------------------------------
         def correr_modelo(num_mod, titulo, var_dep, vars_indep, var_foco):
             st.markdown(f"### {titulo}")
