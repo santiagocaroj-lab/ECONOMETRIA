@@ -18,7 +18,7 @@ st.set_page_config(page_title="Análisis Econométrico de Panel", layout="wide")
 st.title("📊 Análisis Econométrico: Libertad de Prensa, Corrupción e IED")
 st.markdown("""
 Esta aplicación permite transformar una base de datos, explorar descriptivamente las interacciones, 
-identificar casos atípicos y estimar modelos de panel bidimensionales. Utiliza el menú lateral para ajustar los parámetros globales.
+identificar casos atípicos y estimar modelos de panel bidimensionales e invertidos. Utiliza el menú lateral para ajustar los parámetros globales.
 """)
 
 st.sidebar.header("1. Carga de Archivos")
@@ -80,6 +80,7 @@ if uploaded_data is not None:
     # -------------------------------------------------------------------------
     df_long['RSF_L1'] = df_long.groupby('País')['RSF_SCORE'].shift(1)
     df_long['CORRUPCION_L1'] = df_long.groupby('País')['CORRUPCION'].shift(1)
+    df_long['CPI_L1'] = df_long.groupby('País')['CPI_SCORE'].shift(1)
     
     if 'IED_PIB' in df_long.columns:
         df_long['IED_L1'] = df_long.groupby('País')['IED_PIB'].shift(1)
@@ -89,6 +90,7 @@ if uploaded_data is not None:
     # Asignación dinámica de variables explicativas basadas en el Toggle Maestro
     var_rsf_explicativa = 'RSF_L1' if aplicar_rezago_global else 'RSF_SCORE'
     var_corr_explicativa = 'CORRUPCION_L1' if aplicar_rezago_global else 'CORRUPCION'
+    var_cpi_explicativa = 'CPI_L1' if aplicar_rezago_global else 'CPI_SCORE'
     sufijo_tiempo = "(t-1)" if aplicar_rezago_global else "(t)"
 
     # Despliegue modular a través de pestañas funcionales
@@ -157,14 +159,11 @@ if uploaded_data is not None:
             st.plotly_chart(fig_line, use_container_width=True)
 
         st.markdown("---")
-        
-        # --- NUEVO MÓDULO: CASOS ATÍPICOS Y VARIACIONES ---
         st.subheader("2. Casos Atípicos y Análisis de Variación (Ganadores y Perdedores)")
         st.write("Visualiza rápidamente qué países registraron los cambios más extremos (positivos o negativos) comparando su primer año de registro con su último año.")
         
         var_atipica = st.selectbox("Seleccione la variable para analizar casos atípicos:", columnas_grafico)
         
-        # Cálculo de las variaciones extremas
         df_agrupado = df_long.dropna(subset=[var_atipica]).sort_values(by=['País', 'Año'])
         primeros_registros = df_agrupado.groupby('País').first().reset_index()
         ultimos_registros = df_agrupado.groupby('País').last().reset_index()
@@ -178,135 +177,124 @@ if uploaded_data is not None:
             'Variación Neta': ultimos_registros[var_atipica] - primeros_registros[var_atipica]
         }).sort_values(by='Variación Neta', ascending=False)
         
-        # Gráfico de barras divergente
         fig_var = px.bar(
-            df_variaciones, 
-            x='País', 
-            y='Variación Neta', 
-            title=f"Variación Total de {var_atipica} en el Período Estudiado",
-            color='Variación Neta',
-            color_continuous_scale=px.colors.diverging.RdYlGn, # Escala de Rojo (Negativo) a Verde (Positivo)
-            text_auto='.2f'
+            df_variaciones, x='País', y='Variación Neta', title=f"Variación Total de {var_atipica} en el Período Estudiado",
+            color='Variación Neta', color_continuous_scale=px.colors.diverging.RdYlGn, text_auto='.2f'
         )
-        fig_var.update_layout(
-            template='simple_white', 
-            font=dict(family="Arial", color="black"),
-            xaxis_title="", 
-            yaxis_title="Cambio Neto (Puntos/Porcentaje)",
-            coloraxis_showscale=False # Ocultar la barra de color lateral para un look más académico
-        )
+        fig_var.update_layout(template='simple_white', font=dict(family="Arial", color="black"), xaxis_title="", yaxis_title="Cambio Neto", coloraxis_showscale=False)
         st.plotly_chart(fig_var, use_container_width=True)
         
-        # Tablas de resumen para los Top Extremos
         col_ganadores, col_perdedores = st.columns(2)
         with col_ganadores:
             st.success(f"🏆 Top 3: Mayores Incrementos en {var_atipica}")
-            # Formateo limpio para mostrar en pantalla
             st.dataframe(df_variaciones.head(3)[['País', 'Valor Inicial', 'Valor Final', 'Variación Neta']].style.format({"Valor Inicial": "{:.2f}", "Valor Final": "{:.2f}", "Variación Neta": "{:+.2f}"}))
         with col_perdedores:
             st.error(f"🚨 Top 3: Caídas Más Extremas en {var_atipica}")
             st.dataframe(df_variaciones.tail(3)[['País', 'Valor Inicial', 'Valor Final', 'Variación Neta']].style.format({"Valor Inicial": "{:.2f}", "Valor Final": "{:.2f}", "Variación Neta": "{:+.2f}"}))
 
         st.markdown("---")
-        st.subheader(f"3. Diagramas de Dispersión (Dependen del Toggle Maestro: {sufijo_tiempo})")
+        st.subheader(f"3. Diagramas de Dispersión Dinámicos (Efecto Global: {sufijo_tiempo})")
         
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
-            fig_scatter1 = px.scatter(df_long, x=var_rsf_explicativa, y='CORRUPCION', hover_data=['País', 'Año'], trendline='ols', 
-                                      title=f"RSF {sufijo_tiempo} vs Corrupción (t)")
-            fig_scatter1.update_layout(template='simple_white', font=dict(family="Arial", color="black"))
+            fig_scatter1 = px.scatter(df_long, x=var_rsf_explicativa, y='CORRUPCION', hover_data=['País', 'Año'], trendline='ols', title=f"RSF {sufijo_tiempo} vs Corrupción Real (t)")
             st.plotly_chart(fig_scatter1, use_container_width=True)
-            
         with col2:
-            if 'IED_PIB' in df_long.columns:
-                fig_scatter2 = px.scatter(df_long, x=var_corr_explicativa, y='IED_PIB', hover_data=['País', 'Año'], trendline='ols', 
-                                          title=f"Corrupción {sufijo_tiempo} vs IED (t)")
-                fig_scatter2.update_layout(template='simple_white', font=dict(family="Arial", color="black"))
-                st.plotly_chart(fig_scatter2, use_container_width=True)
-                
+            fig_scatter2 = px.scatter(df_long, x=var_rsf_explicativa, y='CPI_SCORE', hover_data=['País', 'Año'], trendline='ols', title=f"RSF {sufijo_tiempo} vs CPI Score (t)")
+            st.plotly_chart(fig_scatter2, use_container_width=True)
         with col3:
             if 'IED_PIB' in df_long.columns:
-                fig_scatter3 = px.scatter(df_long, x=var_rsf_explicativa, y='IED_PIB', hover_data=['País', 'Año'], trendline='ols', 
-                                          title=f"RSF {sufijo_tiempo} vs IED (t)")
-                fig_scatter3.update_layout(template='simple_white', font=dict(family="Arial", color="black"))
+                fig_scatter3 = px.scatter(df_long, x=var_corr_explicativa, y='IED_PIB', hover_data=['País', 'Año'], trendline='ols', title=f"Corrupción {sufijo_tiempo} vs IED (t)")
                 st.plotly_chart(fig_scatter3, use_container_width=True)
+        with col4:
+            if 'IED_PIB' in df_long.columns:
+                fig_scatter4 = px.scatter(df_long, x=var_cpi_explicativa, y='IED_PIB', hover_data=['País', 'Año'], trendline='ols', title=f"CPI Score {sufijo_tiempo} vs IED (t)")
+                st.plotly_chart(fig_scatter4, use_container_width=True)
 
     # =========================================================================
-    # PESTAÑA 3: ESTIMACIÓN DE MODELOS (ESTÁTICOS O DINÁMICOS SEGÚN TOGGLE)
+    # PESTAÑA 3: ESTIMACIÓN DE MODELOS MATRICIALES (INVERTIDOS Y DUALES)
     # =========================================================================
     with tab3:
-        if aplicar_rezago_global:
-            st.subheader("Estimación de Modelos de Panel DINÁMICOS (Efectos Fijos Bidimensionales con Lags)")
-        else:
-            st.subheader("Estimación de Modelos de Panel ESTÁTICOS CONTEMPORÁNEOS (Efectos Fijos Bidimensionales)")
+        tipo_modelo_texto = "DINÁMICOS (Efectos Fijos Bidimensionales con Rezagos t-1)" if aplicar_rezago_global else "ESTÁTICOS CONTEMPORÁNEOS (Efectos Fijos Bidimensionales t)"
+        st.subheader(f"Estimación Matriz Econométrica: Modelos {tipo_modelo_texto}")
+        st.write("Esta sección ejecuta las regresiones controlando por efectos fijos de país y año de manera simultánea. Permite comparar la robustez de usar la Corrupción Directa vs. el CPI Score.")
             
         df_panel = df_long.set_index(['País', 'Año'])
 
-        def interpretar_resultado_sustantivo(modelo_num, variable, coef, p_value, usar_rezago):
+        def interpretar_resultado_avanzado(tipo_modelo, variable_foco, coef, p_value, usar_rezago):
             significativo = p_value < 0.05
+            t_anterior = "en el año anterior impacta" if usar_rezago else "se asocia contemporáneamente con"
             
-            t_anterior = "en el período anterior predice un incremento posterior" if usar_rezago else "se asocia simultáneamente con un incremento"
-            t_previa = "previa" if usar_rezago else "contemporánea"
-            t_subsecuente = "subsecuente" if usar_rezago else "inmediato"
-            t_preceden = "preceden contracciones" if usar_rezago else "están correlacionados con contracciones"
-            t_ahuyenta = "previa actúa como un 'impuesto directo implícito' que ahuyenta" if usar_rezago else "actúa como un 'impuesto directo implícito' que frena inmediatamente"
+            texto = f"**Interpretación Institucional ({variable_foco}):**\n\n"
             
-            texto = f"**Interpretación Institucional Automatizada ({variable}):**\n\n"
-            if modelo_num == 1:
+            if tipo_modelo == "RSF_to_CORR":
                 if significativo:
                     if coef < 0:
-                        texto += (f"El coeficiente asociado a **{variable}** es **negativo** ({coef:.4f}) y **estadísticamente significativo** (p={p_value:.3f} < 0.05). "
-                                  f"Este hallazgo indica que un deterioro en las garantías a la libertad de prensa {t_anterior} en los niveles de corrupción sistémica. "
-                                  "Desde una perspectiva jurídico-institucional, esto demuestra que restringir el ejercicio periodístico debilita los canales de fiscalización social.")
+                        texto += f"El coeficiente es **negativo** ({coef:.4f}) y significativo (p < 0.05). Indica que mayor libertad de prensa {t_anterior} una **reducción de la corrupción real**, validando la teoría de fiscalización social de los medios."
                     else:
-                        texto += (f"El coeficiente asociado a **{variable}** es **positivo** ({coef:.4f}) y **estadísticamente significativo** (p={p_value:.3f} < 0.05). "
-                                  "Este resultado indica que incrementos en los índices de libertad de prensa se asocian con un aumento en las métricas de corrupción. "
-                                  "En la literatura, esto se asocia al 'efecto destape': un entorno de libertad provee condiciones para exponer escándalos previamente ocultos.")
+                        texto += f"El coeficiente es **positivo** ({coef:.4f}) y significativo. Alerta sobre un 'efecto destape': la apertura de prensa visibiliza y expone mediáticamente más casos."
                 else:
-                    texto += f"El coeficiente de **{variable}** ({coef:.4f}) **no es estadísticamente significativo** (p={p_value:.3f} > 0.05). No se observa una relación sistemática bajo esta especificación."
+                    texto += "No se observa un impacto estadísticamente significativo bajo esta especificación de panel de efectos fijos."
                     
-            elif modelo_num == 2:
-                if significativo:
-                    if coef < 0:
-                        texto += (f"El coeficiente es **negativo** ({coef:.4f}) y **estadísticamente significativo** (p={p_value:.3f} < 0.05). "
-                                  f"Evidencia un ciclo destructivo: una mayor prevalencia de corrupción {t_previa} genera un menoscabo {t_subsecuente} sobre la libertad de prensa. "
-                                  "Sugiere que redes institucionalizadas utilizan el poder del Estado para asfixiar a los medios y proteger su impunidad.")
-                    else:
-                        texto += (f"El coeficiente es **positivo** ({coef:.4f}) y **estadísticamente significativo** (p={p_value:.3f} < 0.05). "
-                                  "Mayores niveles de corrupción se asocian con ganancias en libertad de prensa, sugiriendo dinámicas de resistencia civil.")
-                else:
-                    texto += f"El coeficiente de **{variable}** ({coef:.4f}) **no es estadísticamente significativo** (p={p_value:.3f} > 0.05)."
-
-            elif modelo_num == 3:
-                if significativo:
-                    if coef < 0:
-                        texto += (f"El coeficiente es **negativo** ({coef:.4f}) y **estadísticamente significativo** (p={p_value:.3f} < 0.05). "
-                                  f"Valida la tesis del riesgo soberano: la corrupción {t_ahuyenta} los capitales al deteriorar la seguridad jurídica de los contratos de mercado.")
-                    else:
-                        texto += (f"El coeficiente es **positivo** ({coef:.4f}) y **estadísticamente significativo** (p={p_value:.3f} < 0.05). "
-                                  "Se alinea con la hipótesis de 'engrasar las ruedas', donde el capital utiliza canales irregulares para agilizar burocracias ineficientes.")
-                else:
-                    texto += f"El coeficiente de **{variable}** ({coef:.4f}) **no es estadísticamente significativo** (p={p_value:.3f} > 0.05). La opacidad institucional no exhibe un impacto lineal directo sobre la IED."
-
-            elif modelo_num == 4:
+            elif tipo_modelo == "RSF_to_CPI":
                 if significativo:
                     if coef > 0:
-                        texto += (f"El coeficiente es **positivo** ({coef:.4f}) y **estadísticamente significativo** (p={p_value:.3f} < 0.05). "
-                                  "Un entorno transparente y seguro para la prensa genera externalidades económicas positivas. Al mitigar asimetrías de información, cataliza la IED.")
+                        texto += f"El coeficiente es **positivo** ({coef:.4f}) y significativo (p < 0.05). Mayor libertad de prensa {t_anterior} un **incremento en la transparencia (CPI Score)**. Es perfectamente consistente con el modelo de corrupción real (signos opuestos debido a la construcción del índice)."
                     else:
-                        texto += (f"El coeficiente es **negativo** ({coef:.4f}) y **estadísticamente significativo** (p={p_value:.3f} < 0.05). "
-                                  f"Aumentos en la libertad de prensa {t_preceden} en flujos de IED, reflejando una postura transitoria de cautela corporativa frente a turbulencias políticas visibles.")
+                        texto += f"El coeficiente es **negativo** ({coef:.4f}) y significativo. El índice de transparencia se deteriora ante mayor libertad."
                 else:
-                    texto += f"El coeficiente de **{variable}** ({coef:.4f}) **no es estadísticamente significativo** (p={p_value:.3f} > 0.05)."
+                    texto += "El impacto de la libertad de prensa sobre el CPI Score no es estadísticamente significativo."
+                    
+            elif tipo_modelo == "CORR_to_RSF":
+                if significativo:
+                    if coef < 0:
+                        texto += f"El coeficiente es **negativo** ({coef:.4f}) y significativo. Evidencia un canal de **captura institucional**: mayores niveles de corrupción real {t_anterior} un menoscabo posterior de las garantías para el ejercicio periodístico."
+                    else:
+                        texto += f"El coeficiente es **positivo** ({coef:.4f}). Estructuras corruptas se asocian con mayor libertad de prensa."
+                else:
+                    texto += "La hipótesis de retroalimentación inversa desde la corrupción real hacia la prensa no es significativa."
+                    
+            elif tipo_modelo == "CPI_to_RSF":
+                if significativo:
+                    if coef > 0:
+                        texto += f"El coeficiente es **positivo** ({coef:.4f}) y significativo. Demuestra que entornos con mayor transparencia y seguridad jurídica (CPI Score elevado) {t_anterior} un **blindaje y fortalecimiento de la libertad de prensa**."
+                    else:
+                        texto += f"El coeficiente es **negativo** ({coef:.4f}). Mayor transparencia reduce el score de prensa."
+                else:
+                    texto += "La retroalimentación desde el CPI Score hacia la prensa no muestra significancia estadística."
+                    
+            elif tipo_modelo == "CORR_to_IED":
+                if significativo:
+                    if coef < 0:
+                        texto += f"El coeficiente es **negativo** ({coef:.4f}) y significativo. Valida la tesis del **riesgo soberano e incertidumbre**: la corrupción real actúa como un impuesto implícito que ahuyenta los flujos de IED."
+                    else:
+                        texto += f"El coeficiente es **positivo** ({coef:.4f}). Respalda la hipótesis marginal de 'engrasar las ruedas' (grease the wheels) donde la opacidad agiliza burocracias."
+                else:
+                    texto += "La opacidad institucional medida por la corrupción real no muestra un impacto directo y lineal sobre la atracción de IED."
+                    
+            elif tipo_modelo == "CPI_to_IED":
+                if significativo:
+                    if coef > 0:
+                        texto += f"El coeficiente es **positivo** ({coef:.4f}) y significativo. Un aumento en la transparencia (CPI Score) {t_anterior} una **mayor atracción de inversión extranjera directa**, probando que los inversionistas priorizan la certeza institucional."
+                    else:
+                        texto += f"El coeficiente es **negativo** ({coef:.4f}). Mayor transparencia reduce los flujos de capital."
+                else:
+                    texto += "La puntuación del CPI no exhibe un impacto estadísticamente significativo sobre los niveles de IED."
+                    
+            elif tipo_modelo == "RSF_to_IED":
+                if significativo:
+                    if coef > 0:
+                        texto += f"El coeficiente es **positivo** ({coef:.4f}) y significativo. La libertad de prensa ejerce un beneficio económico directo sobre la IED, reduciendo las asimetrías de información del mercado exterior."
+                    else:
+                        texto += f"El coeficiente es **negativo** ({coef:.4f})."
+                else:
+                    texto += "La libertad de prensa no muestra un impacto directo significativo sobre la IED fuera de su canal mediador institucional."
             return texto
 
         resultados_exportacion, interpretaciones_exportacion = {}, {}
 
-        # ---------------------------------------------------------------------
-        # ESTRUCTURACIÓN DE MODELOS
-        # ---------------------------------------------------------------------
-        def correr_modelo(num_mod, titulo, var_dep, vars_indep, var_foco):
-            st.markdown(f"### {titulo}")
+        def correr_modelo_panel(num_mod, titulo, var_dep, vars_indep, var_foco, tipo_clave):
+            st.markdown(f"#### {titulo}")
             variables_necesarias = [var_dep] + vars_indep
             df_m = df_panel[variables_necesarias].dropna()
             
@@ -317,31 +305,41 @@ if uploaded_data is not None:
                 res = mod.fit(cov_type='robust')
                 st.text(res.summary)
                 
-                interp = interpretar_resultado_sustantivo(num_mod, var_foco, res.params[var_foco], res.pvalues[var_foco], aplicar_rezago_global)
-                st.info("💡 **Interpretación Sustantiva:**\n\n" + interp)
+                interp = interpretar_resultado_avanzado(tipo_clave, var_foco, res.params[var_foco], res.pvalues[var_foco], aplicar_rezago_global)
+                st.info("💡 " + interp)
                 
                 resultados_exportacion[titulo] = res.summary.as_text()
                 interpretaciones_exportacion[titulo] = interp
             else:
-                st.warning(f"No hay suficientes datos válidos para estimar el Modelo {num_mod}.")
+                st.warning(f"Insuficientes datos válidos para computar el {titulo}.")
 
-        # MODELO 1
-        vars_indep_m1 = ['RSF_L1', 'CORRUPCION_L1'] if aplicar_rezago_global else ['RSF_SCORE']
-        correr_modelo(1, "Modelo 1: Efecto de Libertad de Prensa sobre Corrupción", 'CORRUPCION', vars_indep_m1, var_rsf_explicativa)
+        # BLOQUE 1: LIBERTAD DE PRENSA COMO PREDICTOR DE INSTITUCIONES
+        st.markdown("### 🏛️ Bloque 1: Impacto de la Libertad de Prensa sobre la Calidad Institucional")
+        vars_m1 = ['RSF_L1', 'CORRUPCION_L1'] if aplicar_rezago_global else ['RSF_SCORE']
+        correr_modelo_panel("1A", "Modelo 1A: Efecto de Prensa sobre Corrupción Real", 'CORRUPCION', vars_m1, var_rsf_explicativa, "RSF_to_CORR")
+        
+        vars_m1b = ['RSF_L1', 'CPI_L1'] if aplicar_rezago_global else ['RSF_SCORE']
+        correr_modelo_panel("1B", "Modelo 1B: Efecto de Prensa sobre el CPI Score (Transparencia)", 'CPI_SCORE', vars_m1b, var_rsf_explicativa, "RSF_to_CPI")
 
-        # MODELO 2
-        vars_indep_m2 = ['CORRUPCION_L1', 'RSF_L1'] if aplicar_rezago_global else ['CORRUPCION']
-        correr_modelo(2, "Modelo 2: Efecto de Corrupción sobre Libertad de Prensa", 'RSF_SCORE', vars_indep_m2, var_corr_explicativa)
+        # BLOQUE 2: RELACIÓN INVERTIDA (RETROALIMENTACIÓN)
+        st.markdown("### 🔄 Bloque 2: Modelos Invertidos (Efecto de las Instituciones sobre la Prensa)")
+        vars_m2a = ['CORRUPCION_L1', 'RSF_L1'] if aplicar_rezago_global else ['CORRUPCION']
+        correr_modelo_panel("2A", "Modelo 2A Invertido: Efecto de Corrupción Real sobre la Prensa", 'RSF_SCORE', vars_m2a, var_corr_explicativa, "CORR_to_RSF")
+        
+        vars_m2b = ['CPI_L1', 'RSF_L1'] if aplicar_rezago_global else ['CPI_SCORE']
+        correr_modelo_panel("2B", "Modelo 2B Invertido: Efecto del CPI Score sobre la Prensa", 'RSF_SCORE', vars_m2b, var_cpi_explicativa, "CPI_to_RSF")
 
-        # MODELO 3
+        # BLOQUE 3: IMPACTO SOBRE LA INVERSIÓN EXTRANJERA DIRECTA (IED)
         if 'IED_PIB' in df_panel.columns:
-            vars_indep_m3 = ['CORRUPCION_L1', 'IED_L1'] if aplicar_rezago_global else ['CORRUPCION']
-            correr_modelo(3, "Modelo 3: Efecto de Corrupción sobre IED", 'IED_PIB', vars_indep_m3, var_corr_explicativa)
-
-        # MODELO 4
-        if 'IED_PIB' in df_panel.columns:
-            vars_indep_m4 = ['RSF_L1', 'IED_L1'] if aplicar_rezago_global else ['RSF_SCORE']
-            correr_modelo(4, "Modelo 4: Efecto de Libertad de Prensa sobre IED", 'IED_PIB', vars_indep_m4, var_rsf_explicativa)
+            st.markdown("### 📈 Bloque 3: Determinantes de la Inversión Extranjera Directa (IED)")
+            vars_m3a = ['CORRUPCION_L1', 'IED_L1'] if aplicar_rezago_global else ['CORRUPCION']
+            correr_modelo_panel("3A", "Modelo 3A: Efecto de Corrupción Real sobre la IED", 'IED_PIB', vars_m3a, var_corr_explicativa, "CORR_to_IED")
+            
+            vars_m3b = ['CPI_L1', 'IED_L1'] if aplicar_rezago_global else ['CPI_SCORE']
+            correr_modelo_panel("3B", "Modelo 3B: Efecto del CPI Score (Transparencia) sobre la IED", 'IED_PIB', vars_m3b, var_cpi_explicativa, "CPI_to_IED")
+            
+            vars_m4 = ['RSF_L1', 'IED_L1'] if aplicar_rezago_global else ['RSF_SCORE']
+            correr_modelo_panel("4", "Modelo 4: Efecto Directo de la Libertad de Prensa sobre la IED", 'IED_PIB', vars_m4, var_rsf_explicativa, "RSF_to_IED")
 
     # =========================================================================
     # PESTAÑA 4: COMPILACIÓN Y EXPORTACIÓN DE REPORTES INSTITUCIONALES
@@ -360,15 +358,15 @@ if uploaded_data is not None:
         
         def generar_word_reporte():
             doc = docx.Document()
-            doc.add_heading('Informe de Investigación: Libertad de Prensa, Calidad Institucional y Desempeño Económico', 0)
+            doc.add_heading('Informe de Investigación Econométrica: Libertad de Prensa, Corrupción e IED', 0)
             
-            tipo_mod = "Dinámicos con Rezagos (t-1)" if aplicar_rezago_global else "Estáticos Contemporáneos (t)"
-            doc.add_paragraph(f"Nota Metodológica: Para la estructuración de este reporte se utilizó el modelo de {tipo_mod}.")
+            tipo_mod = "Dinámicos con Rezagos Completos (t-1)" if aplicar_rezago_global else "Estáticos Contemporáneos de Control (t)"
+            doc.add_paragraph(f"Nota Metodológica Integrada: Este reporte compila los resultados utilizando una especificación de modelos {tipo_mod}.")
             
             doc.add_heading('1. Análisis Descriptivo Agregado del Panel', level=1)
             doc.add_paragraph(desc_stats.to_string())
             
-            doc.add_heading('2. Estimaciones con Modelos de Panel', level=1)
+            doc.add_heading('2. Estimaciones de Regresión de Panel (Efectos Fijos Bidimensionales)', level=1)
             
             for nombre_modelo, resumen_texto in resultados_exportacion.items():
                 doc.add_heading(nombre_modelo, level=2)
@@ -382,8 +380,8 @@ if uploaded_data is not None:
             
         word_data = generar_word_reporte()
         st.download_button(
-            label="📄 Descargar Informe Completo (Word)",
+            label="📄 Descargar Informe Completo Ampliado (Word)",
             data=word_data,
-            file_name="Reporte_Final_Econometrico.docx",
+            file_name="Reporte_Final_Econometrico_Ampliado.docx",
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
